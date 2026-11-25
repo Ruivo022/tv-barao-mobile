@@ -1,11 +1,10 @@
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
   TextInput,
   StyleSheet,
-  Image,
   ScrollView,
   TouchableOpacity,
   Alert,
@@ -13,13 +12,63 @@ import {
 } from 'react-native';
 
 import * as ImagePicker from 'expo-image-picker';
+import PreviewDaTV from '../components/PreviewDaTV';
+import RecorteFoto from '../components/RecorteFoto';
+import { publicarAviso } from '../services/publishService';
 import colors from '../theme/colors';
 
-export default function Screen() {
-  const [imagem, setImagem] = useState(null);
+const MODELOS = [
+  {
+    categoria: 'Layout 2: Cyber Dashboard',
+    nome: 'Modelo 1: Split Dashboard',
+    detalhes: 'Imagem e texto lado a lado',
+    usaImagem: true,
+    usaTexto: true,
+  },
+  {
+    categoria: 'Layout 3: Editorial Nobre',
+    nome: 'Modelo 2: Apenas Texto / Editorial',
+    detalhes: 'Título e descrição centralizados',
+    usaImagem: false,
+    usaTexto: true,
+  },
+  {
+    categoria: 'Layout 4: Foto Puro',
+    nome: 'Modelo 3: Mídia Pura em Tela Cheia',
+    detalhes: 'Imagem em tela cheia, sem texto',
+    usaImagem: true,
+    usaTexto: false,
+  },
+];
+
+function temDimensoes(imagem) {
+  return Number.isFinite(imagem?.width) && imagem.width > 0 &&
+    Number.isFinite(imagem?.height) && imagem.height > 0;
+}
+
+export default function PublishScreen({ usuarioId }) {
+  const [modelo, setModelo] = useState(MODELOS[0]);
+  const [foto, setFoto] = useState(null);
+  const [recortando, setRecortando] = useState(false);
   const [titulo, setTitulo] = useState('');
   const [descricao, setDescricao] = useState('');
   const [publicando, setPublicando] = useState(false);
+  const [retorno, setRetorno] = useState(null);
+  const envioEmAndamento = useRef(false);
+  const tentativa = useRef({});
+  const { categoria, usaImagem, usaTexto } = modelo;
+  const imagem = foto?.atual;
+
+  function alterarImagem(novaImagem, original = novaImagem) {
+    tentativa.current = {};
+    setFoto(novaImagem ? { atual: novaImagem, original } : null);
+    setRetorno(null);
+  }
+
+  function selecionarImagem(original) {
+    alterarImagem(original);
+    setRecortando(temDimensoes(original));
+  }
 
   async function tirarFoto() {
     const permissao =
@@ -35,13 +84,11 @@ export default function Screen() {
 
     const resultado = await ImagePicker.launchCameraAsync({
       mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [4, 3],
       quality: 0.8,
     });
 
     if (!resultado.canceled) {
-      setImagem(resultado.assets[0]);
+      selecionarImagem(resultado.assets[0]);
     }
   }
 
@@ -60,49 +107,56 @@ export default function Screen() {
     const resultado =
       await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [4, 3],
         quality: 0.8,
       });
 
     if (!resultado.canceled) {
-      setImagem(resultado.assets[0]);
+      selecionarImagem(resultado.assets[0]);
     }
   }
 
   async function publicar() {
-    if (!imagem) {
-      Alert.alert(
-        'Escolha uma imagem',
-        'Tire uma foto ou selecione uma imagem da galeria.'
-      );
+    if (envioEmAndamento.current || recortando) return;
+
+    if (usaImagem && !imagem) {
+      setRetorno({ erro: true, texto: 'Tire uma foto ou escolha uma imagem da galeria.' });
       return;
     }
 
-    if (!titulo.trim()) {
-      Alert.alert(
-        'Informe o título',
-        'Digite um título para a publicação.'
-      );
+    if (usaTexto && !titulo.trim()) {
+      setRetorno({ erro: true, texto: 'Digite um título para a publicação.' });
       return;
     }
 
+    if (!usaImagem && !descricao.trim()) {
+      setRetorno({ erro: true, texto: 'Digite a descrição do aviso editorial.' });
+      return;
+    }
+
+    envioEmAndamento.current = true;
     setPublicando(true);
+    setRetorno(null);
 
     try {
-      // Aqui será feita a integração com o Supabase
-      // para enviar a imagem e salvar a publicação.
-
-      Alert.alert(
-        'Imagem selecionada!',
-        'A tela está pronta. Conecte o envio ao Supabase para publicar na TV.',
-      );
+      await publicarAviso({
+        imagem: usaImagem ? imagem : null,
+        titulo: usaTexto ? titulo.trim() : '',
+        descricao: usaTexto ? descricao.trim() : '',
+        categoria,
+        usuarioId,
+        tentativa: usaImagem ? tentativa.current : {},
+      });
+      alterarImagem(null);
+      setTitulo('');
+      setDescricao('');
+      setRetorno({ texto: 'Aviso publicado. A TV vai incluir o aviso na rotação.' });
     } catch (erro) {
-      Alert.alert(
-        'Erro',
-        'Não foi possível publicar a imagem.'
-      );
+      setRetorno({
+        erro: true,
+        texto: erro instanceof Error ? erro.message : 'Confira a conexão e tente novamente.',
+      });
     } finally {
+      envioEmAndamento.current = false;
       setPublicando(false);
     }
   }
@@ -126,84 +180,121 @@ export default function Screen() {
           NOVA PUBLICAÇÃO
         </Text>
 
-        <Text style={styles.label}>Imagem da publicação</Text>
+        <Text style={styles.label}>Prévia na TV</Text>
+        <PreviewDaTV
+          rascunho
+          aviso={{
+            categoria,
+            link_fundo: usaImagem ? imagem?.uri : null,
+            titulo: titulo.trim(),
+            descricao: descricao.trim(),
+          }}
+        />
 
-        {imagem ? (
-          <View style={styles.previewContainer}>
-            <Image
-              source={{ uri: imagem.uri }}
-              style={styles.preview}
-              resizeMode="contain"
-            />
+        {usaImagem && (
+          <View>
+            <TouchableOpacity
+              style={styles.cameraButton}
+              onPress={tirarFoto}
+              disabled={publicando}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.cameraButtonText}>Tirar foto agora</Text>
+            </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.removeButton}
-              onPress={() => setImagem(null)}
+              style={styles.galleryButton}
+              onPress={escolherGaleria}
+              disabled={publicando}
+              activeOpacity={0.8}
             >
-              <Text style={styles.removeText}>
-                Remover imagem
-              </Text>
+              <Text style={styles.galleryButtonText}>Escolher da galeria</Text>
             </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={styles.uploadArea}>
-            <Text style={styles.cameraIcon}>▧</Text>
 
-            <Text style={styles.uploadTitle}>
-              Adicione uma foto
-            </Text>
-
-            <Text style={styles.uploadHint}>
-              Tire uma foto ou escolha um arquivo do celular.
-            </Text>
+            {imagem && (
+              <View style={styles.imageActions}>
+                {temDimensoes(foto.original) && (
+                  <TouchableOpacity
+                    style={styles.imageAction}
+                    onPress={() => setRecortando(true)}
+                    disabled={publicando}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.cropText}>Recortar foto</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={styles.imageAction}
+                  onPress={() => alterarImagem(null)}
+                  disabled={publicando}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.removeText}>Remover imagem</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         )}
 
-        <TouchableOpacity
-          style={styles.cameraButton}
-          onPress={tirarFoto}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.cameraButtonText}>
-            ◎  Tirar foto agora
-          </Text>
-        </TouchableOpacity>
+        <Text style={styles.label}>Modelo do layout</Text>
+        <View accessibilityRole="radiogroup" accessibilityLabel="Modelo do layout" style={styles.modelOptions}>
+          {MODELOS.map((opcao) => {
+            const selecionado = opcao === modelo;
+            return (
+              <TouchableOpacity
+                key={opcao.categoria}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: selecionado, disabled: publicando }}
+                disabled={publicando}
+                onPress={() => {
+                  setModelo(opcao);
+                  setRetorno(null);
+                }}
+                style={[styles.modelOption, selecionado && styles.modelOptionSelected]}
+              >
+                <View style={[styles.radio, selecionado && styles.radioSelected]}>
+                  {selecionado && <View style={styles.radioDot} />}
+                </View>
+                <View style={styles.modelCopy}>
+                  <Text style={[styles.modelName, selecionado && styles.modelNameSelected]}>{opcao.nome}</Text>
+                  <Text style={styles.modelDetails}>{opcao.detalhes}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
 
-        <TouchableOpacity
-          style={styles.galleryButton}
-          onPress={escolherGaleria}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.galleryButtonText}>
-            ▧  Escolher da galeria
-          </Text>
-        </TouchableOpacity>
+        {usaImagem && usaTexto && <View style={styles.divider} />}
 
-        <View style={styles.divider} />
+        {usaTexto && (
+          <View>
+            <Text style={styles.label}>Título</Text>
 
-        <Text style={styles.label}>Título</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Ex.: Feira de Ciências"
+              placeholderTextColor={colors.textSecondary}
+              value={titulo}
+              onChangeText={setTitulo}
+              editable={!publicando}
+              maxLength={100}
+            />
 
-        <TextInput
-          style={styles.input}
-          placeholder="Ex.: Feira de Ciências"
-          placeholderTextColor={colors.textSecondary}
-          value={titulo}
-          onChangeText={setTitulo}
-          maxLength={100}
-        />
+            <Text style={styles.label}>{usaImagem ? 'Descrição (opcional)' : 'Descrição'}</Text>
 
-        <Text style={styles.label}>Descrição (opcional)</Text>
-
-        <TextInput
-          style={[styles.input, styles.textArea]}
-          placeholder="Escreva uma mensagem para aparecer na TV..."
-          placeholderTextColor={colors.textSecondary}
-          value={descricao}
-          onChangeText={setDescricao}
-          multiline
-          maxLength={500}
-          textAlignVertical="top"
-        />
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              placeholder="Escreva uma mensagem para aparecer na TV..."
+              placeholderTextColor={colors.textSecondary}
+              value={descricao}
+              onChangeText={setDescricao}
+              editable={!publicando}
+              multiline
+              maxLength={500}
+              textAlignVertical="top"
+            />
+          </View>
+        )}
 
         <TouchableOpacity
           style={[
@@ -223,10 +314,30 @@ export default function Screen() {
           )}
         </TouchableOpacity>
 
+        {retorno && (
+          <Text
+            accessibilityRole="alert"
+            accessibilityLiveRegion="polite"
+            style={[styles.feedback, retorno.erro && styles.feedbackError]}
+          >
+            {retorno.texto}
+          </Text>
+        )}
+
         <Text style={styles.footerNote}>
-          Revise a imagem e o título antes de publicar.
+          Revise o conteúdo antes de publicar.
         </Text>
       </View>
+      {recortando && foto && (
+        <RecorteFoto
+          imagem={foto.original}
+          aoFechar={() => setRecortando(false)}
+          aoAplicar={(recorte) => {
+            alterarImagem(recorte, foto.original);
+            setRecortando(false);
+          }}
+        />
+      )}
     </ScrollView>
   );
 }
@@ -279,47 +390,67 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     marginTop: 18,
   },
-  uploadArea: {
-    minHeight: 180,
+  modelOptions: {
+    gap: 8,
+  },
+  modelOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#080D19',
     borderWidth: 1,
-    borderColor: '#34415A',
-    borderStyle: 'dashed',
-    borderRadius: 12,
+    borderColor: '#29364D',
+    borderRadius: 10,
+    padding: 12,
+  },
+  modelOptionSelected: {
+    borderColor: colors.primary,
+  },
+  radio: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: colors.textSecondary,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 20,
-    backgroundColor: '#080D19',
   },
-  cameraIcon: {
-    color: '#00D9F5',
-    fontSize: 40,
-    marginBottom: 10,
+  radioSelected: {
+    borderColor: colors.primary,
   },
-  uploadTitle: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '800',
+  radioDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.primary,
   },
-  uploadHint: {
-    color: '#8795AD',
+  modelCopy: {
+    flex: 1,
+  },
+  modelName: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  modelNameSelected: {
+    color: colors.primary,
+  },
+  modelDetails: {
+    color: colors.textSecondary,
     fontSize: 12,
-    textAlign: 'center',
-    marginTop: 8,
-    lineHeight: 18,
+    marginTop: 3,
   },
-  previewContainer: {
-    backgroundColor: '#080D19',
-    borderRadius: 12,
-    padding: 8,
-    alignItems: 'center',
+  imageActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
   },
-  preview: {
-    width: '100%',
-    height: 260,
-    borderRadius: 8,
-  },
-  removeButton: {
+  imageAction: {
     padding: 12,
+  },
+  cropText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '700',
   },
   removeText: {
     color: '#FF7185',
@@ -384,6 +515,15 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '900',
     fontSize: 14,
+  },
+  feedback: {
+    color: colors.success,
+    fontSize: 13,
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  feedbackError: {
+    color: '#FF7185',
   },
   footerNote: {
     color: '#8493AD',

@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "tv_barao_mobile",
+    "name": "Tv Barão",
     "slug": "tv_barao_mobile",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -10,10 +10,11 @@
       "supportsTablet": true
     },
     "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
-      }
+      "package": "com.tvbarao.mobile",
+      "permissions": [
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -28,8 +29,19 @@
           "backgroundColor": "#ffffff"
         }
       ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Permitir que a TV Barão use Face ID para desbloquear o aplicativo."
+        }
+      ],
       "expo-video",
       "expo-image"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "f5cadbe0-45c9-4265-90b8-dc1053c2eb3e"
+      }
+    }
   }
 }

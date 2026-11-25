@@ -15,13 +15,15 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import colors from '../theme/colors';
 
-export default function Screen() {
+export default function Screen({ emailDaConta, nomeBiometria, biometriaAtiva, aoAlterarBiometria, aoSair }) {
   const [temaEscuro, setTemaEscuro] = useState(true);
 
   const [nome, setNome] = useState('Administrador TV Barão');
-  const [email, setEmail] = useState('admin@tvbarao.com.br');
+  const [email, setEmail] = useState(emailDaConta || '');
   const [editando, setEditando] = useState(false);
   const [foto, setFoto] = useState(null);
+  const [saindo, setSaindo] = useState(false);
+  const [alterandoBiometria, setAlterandoBiometria] = useState(false);
 
   const tema = temaEscuro
     ? {
@@ -78,6 +80,28 @@ export default function Screen() {
       'Perfil atualizado',
       'Os dados foram atualizados nesta tela.'
     );
+  }
+
+  async function sairDaConta() {
+    setSaindo(true);
+    try {
+      await aoSair();
+    } catch {
+      Alert.alert('Falha ao sair', 'Confira a conexão e tente novamente.');
+    } finally {
+      setSaindo(false);
+    }
+  }
+
+  async function mudarBiometria(ativar) {
+    setAlterandoBiometria(true);
+    try {
+      await aoAlterarBiometria(ativar);
+    } catch (erro) {
+      Alert.alert('Biometria', erro instanceof Error ? erro.message : 'Não foi possível salvar a preferência.');
+    } finally {
+      setAlterandoBiometria(false);
+    }
   }
 
   return (
@@ -296,16 +320,33 @@ export default function Screen() {
           </View>
         </View>
 
+        {!!nomeBiometria && (
+          <View style={styles.row}>
+            <View style={styles.rowContent}>
+              <Text style={[styles.itemTitle, { color: tema.texto }]}>
+                Desbloquear com {nomeBiometria}
+              </Text>
+              <Text style={[styles.itemSubtitle, { color: tema.secundario }]}>
+                Use ao reabrir o app neste aparelho.
+              </Text>
+            </View>
+            <Switch
+              accessibilityLabel={`Desbloquear com ${nomeBiometria}`}
+              value={biometriaAtiva}
+              onValueChange={mudarBiometria}
+              disabled={alterandoBiometria || saindo}
+              trackColor={{ false: '#CBD5E1', true: '#482485' }}
+              thumbColor={biometriaAtiva ? '#00D9F5' : '#FFFFFF'}
+            />
+          </View>
+        )}
+
         <TouchableOpacity
           style={styles.logoutButton}
-          onPress={() =>
-            Alert.alert(
-              'Sair da conta',
-              'Para ativar esta opção, conecte-a ao sistema de autenticação do aplicativo.'
-            )
-          }
+          onPress={sairDaConta}
+          disabled={saindo || alterandoBiometria}
         >
-          <Text style={styles.logoutText}>Sair da conta</Text>
+          <Text style={styles.logoutText}>{saindo ? 'Saindo…' : 'Sair da conta'}</Text>
         </TouchableOpacity>
       </View>
 

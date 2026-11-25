@@ -8,9 +8,6 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Image } from 'expo-image';
-import { useVideoPlayer, VideoView } from 'expo-video';
 import {
   CirclePause,
   CirclePlay,
@@ -20,94 +17,9 @@ import {
   Tv,
 } from 'lucide-react-native';
 
+import PreviewDaTV from '../components/PreviewDaTV';
 import { conectarControleTV, enviarComandoTV } from '../services/remoteControl';
 import colors from '../theme/colors';
-
-function PreviewDaTV({ aviso, textoLetreiro }) {
-  const link = aviso?.link_fundo || null;
-  const categoria = aviso?.categoria || '';
-  const [imagemComFalha, setImagemComFalha] = useState(null);
-  const imagemIndisponivel = link && imagemComFalha === link;
-  useEffect(() => setImagemComFalha(null), [link]);
-  const video = Boolean(link && (/\.(mp4|webm|ogg|mov|m3u8)(\?.*)?$/i.test(link) || link.includes('video')));
-  const player = useVideoPlayer(video ? link : null, (instancia) => {
-    instancia.loop = true;
-    instancia.muted = true;
-  });
-  useEffect(() => {
-    if (video) player.play();
-    else player.pause();
-  }, [link, player, video]);
-
-  const semImagem = categoria.includes('Layout 3') || !link;
-  const somenteImagem = categoria.includes('Layout 4');
-  const layoutDividido = categoria.includes('Layout 2') || categoria.includes('Layout 5');
-  const imagem = (
-    <View style={styles.previewMedia}>
-      {video ? (
-        <VideoView
-          player={player}
-          style={StyleSheet.absoluteFillObject}
-          nativeControls={false}
-          contentFit="contain"
-        />
-      ) : link && !imagemIndisponivel ? (
-        <Image
-          source={{ uri: link }}
-          style={styles.previewImage}
-          contentFit="contain"
-          transition={150}
-          onError={(event) => {
-            console.warn('Não foi possível carregar a imagem do aviso no dispositivo.', event?.error);
-            setImagemComFalha(link);
-          }}
-        />
-      ) : (
-        <View style={styles.noMedia}>
-          <Tv size={26} color={colors.textMuted} />
-          <Text style={styles.noMediaText}>{imagemIndisponivel ? 'IMAGEM INDISPONÍVEL' : 'AVISO SEM MÍDIA'}</Text>
-        </View>
-      )}
-    </View>
-  );
-
-  const texto = (
-    <View style={[styles.previewText, semImagem && styles.previewTextOnly]}>
-      <Text numberOfLines={2} style={styles.previewTitle}>
-        {aviso?.titulo || 'MURAL DIGITAL'}
-      </Text>
-      {aviso?.descricao ? (
-        <Text numberOfLines={2} style={styles.previewDescription}>
-          {aviso.descricao}
-        </Text>
-      ) : null}
-      {aviso?.horario ? <Text numberOfLines={1} style={styles.previewSchedule}>{aviso.horario}</Text> : null}
-    </View>
-  );
-
-  return (
-    <View style={styles.previewFrame}>
-      <View style={[styles.previewContent, layoutDividido && styles.previewSplit]}>
-        {semImagem ? (
-          texto
-        ) : layoutDividido ? (
-          categoria.includes('Layout 5') ? <>{imagem}{texto}</> : <>{texto}{imagem}</>
-        ) : (
-          <>
-            {imagem}
-            {!somenteImagem ? <View style={styles.previewOverlay}>{texto}</View> : null}
-          </>
-        )}
-      </View>
-      <View style={styles.previewTicker}>
-        <Text style={styles.tickerLabel}>AVISO</Text>
-        <Text numberOfLines={1} style={styles.tickerText}>
-          {textoLetreiro || 'Painel Informativo PEI Barão de Jundiaí'}
-        </Text>
-      </View>
-    </View>
-  );
-}
 
 export default function RemoteScreen() {
   const [estadoTV, setEstadoTV] = useState(null);
@@ -144,6 +56,9 @@ export default function RemoteScreen() {
   const avisosBanco = previaBanco?.avisos || [];
   const avisoBancoAtual = avisosBanco[indiceAvisoBanco] || null;
   const avisoAtual = tvConectada ? estadoTV.aviso : avisoBancoAtual;
+  const duracaoGravada = Number(avisoAtual?.duracao);
+  const duracaoAviso = Number.isFinite(duracaoGravada) && duracaoGravada > 0 ? duracaoGravada : 10;
+  const tituloAvisoAtual = avisoAtual && (avisoAtual.titulo || 'Aviso sem título');
   const letreiroAtual = tvConectada ? estadoTV.letreiro : previaBanco?.letreiro;
   const estadoExibido = tvConectada
     ? estadoTV.pausada
@@ -151,13 +66,15 @@ export default function RemoteScreen() {
       : estadoTV.fixada
         ? 'AVISO FIXADO'
         : 'TV AO VIVO'
-    : avisosBanco.length > 0
-      ? 'PRÉVIA DO SUPABASE'
-      : previaBanco
-        ? 'SUPABASE SEM AVISOS'
-      : erroLeituraBanco
-        ? 'FALHA AO LER O SUPABASE'
-        : 'CONECTANDO AO SUPABASE';
+    : statusCanal === 'SUBSCRIBED'
+      ? 'SUPABASE CONECTADO'
+      : avisosBanco.length > 0
+        ? 'PRÉVIA DO SUPABASE'
+        : previaBanco
+          ? 'SUPABASE SEM AVISOS'
+          : erroLeituraBanco
+            ? 'FALHA AO LER O SUPABASE'
+            : 'CONECTANDO AO SUPABASE';
 
   useEffect(() => {
     if (tvConectada || avisosBanco.length <= 1) {
@@ -165,9 +82,8 @@ export default function RemoteScreen() {
       return undefined;
     }
 
-    const duracaoSegundos = Math.max(1, Number(avisoBancoAtual?.duracao) || 10);
-    const fimDoAviso = Date.now() + duracaoSegundos * 1000;
-    setSegundosRestantes(duracaoSegundos);
+    const fimDoAviso = Date.now() + duracaoAviso * 1000;
+    setSegundosRestantes(duracaoAviso);
     const rotationInterval = setInterval(() => {
       const restantes = Math.max(0, Math.ceil((fimDoAviso - Date.now()) / 1000));
       setSegundosRestantes(restantes);
@@ -178,7 +94,7 @@ export default function RemoteScreen() {
     }, 1000);
 
     return () => clearInterval(rotationInterval);
-  }, [tvConectada, avisosBanco, indiceAvisoBanco, avisoBancoAtual?.duracao]);
+  }, [tvConectada, avisosBanco, indiceAvisoBanco, duracaoAviso]);
 
   async function executarComando(acao, payload = {}) {
     if (!tvConectada || comandoEmAndamento) return;
@@ -208,7 +124,7 @@ export default function RemoteScreen() {
   const acaoFixar = estadoTV?.fixada ? 'RETOMAR' : 'FIXAR';
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={styles.screen}>
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.heading}>
           <Text style={styles.eyebrow}>PEI BARÃO DE JUNDIAÍ</Text>
@@ -222,21 +138,21 @@ export default function RemoteScreen() {
         <View style={styles.previewCard}>
           <View style={styles.previewHeader}>
             <View>
-              <Text style={styles.previewEyebrow}>{tvConectada ? 'O QUE ESTÁ NA TV' : 'AVISOS DO SUPABASE'}</Text>
+              <Text style={styles.previewEyebrow}>{tvConectada ? 'O QUE ESTÁ NA TV' : 'PRÉVIA DO MURAL'}</Text>
               <Text numberOfLines={1} style={styles.previewHeading}>
-                {avisoAtual?.titulo || (previaBanco ? 'Nenhum aviso cadastrado' : 'Carregando do Supabase')}
+                {tituloAvisoAtual || (previaBanco ? 'Nenhum aviso cadastrado' : 'Carregando do Supabase')}
               </Text>
             </View>
             <View style={[styles.liveBadge, tvConectada ? null : avisosBanco.length > 0 ? styles.databaseBadge : styles.offlineBadge]}>
               {!previaBanco && !tvConectada && !erroLeituraBanco ? <ActivityIndicator size="small" color={colors.warning} /> : <View style={[styles.liveDot, tvConectada ? null : avisosBanco.length > 0 ? styles.databaseDot : styles.liveDotOffline]} />}
               <Text style={[styles.liveText, tvConectada ? null : avisosBanco.length > 0 ? styles.databaseText : styles.offlineText]}>
-                {tvConectada ? 'TV AO VIVO' : avisosBanco.length > 0 ? `${indiceAvisoBanco + 1}/${avisosBanco.length} · ${segundosRestantes ?? avisoBancoAtual?.duracao ?? 10}s` : previaBanco ? 'SEM AVISOS' : erroLeituraBanco ? 'ERRO' : 'CONECTANDO'}
+                {tvConectada ? 'TV AO VIVO' : avisosBanco.length > 0 ? `${indiceAvisoBanco + 1}/${avisosBanco.length}` : previaBanco ? 'SEM AVISOS' : erroLeituraBanco ? 'ERRO' : 'CONECTANDO'}
               </Text>
             </View>
           </View>
 
           {avisoAtual ? (
-            <PreviewDaTV aviso={avisoAtual} textoLetreiro={letreiroAtual} />
+            <PreviewDaTV aviso={avisoAtual} textoLetreiro={letreiroAtual} tvConectada={tvConectada} />
           ) : (
             <View style={styles.previewOffline}>
               <Tv size={35} color={colors.textMuted} />
@@ -245,6 +161,12 @@ export default function RemoteScreen() {
                 {previaBanco ? 'Cadastre um aviso na tabela avisos para exibir a prévia.' : erroLeituraBanco ? 'Confira a conexão com a internet e as permissões de leitura da tabela avisos.' : 'A prévia aparecerá assim que o banco responder.'}
               </Text>
             </View>
+          )}
+          {avisoAtual && (
+            <Text style={styles.helperText}>
+              Duração cadastrada {duracaoAviso}s
+              {!tvConectada && segundosRestantes != null ? ` · Troca em ${segundosRestantes}s` : ''}
+            </Text>
           )}
         </View>
 
@@ -303,9 +225,7 @@ export default function RemoteScreen() {
         <Text style={styles.helperText}>
           {tvConectada
             ? 'Prévia sincronizada com o aviso exibido na TV. Os comandos atuam sobre essa tela.'
-            : avisosBanco.length > 0
-              ? `Exibindo ${indiceAvisoBanco + 1} de ${avisosBanco.length} avisos do Supabase, com a duração cadastrada em cada um.`
-              : `Conexão de controle: ${statusCanal}. A tela é carregada diretamente da tabela avisos.`}
+            : 'Abra a tela da TV no navegador que exibe o mural. O app sincroniza automaticamente assim que ela entrar online.'}
         </Text>
         {mensagem ? <Text style={styles.feedbackText}>{mensagem}</Text> : null}
         {erroLeituraBanco ? (
@@ -315,12 +235,12 @@ export default function RemoteScreen() {
           <Text style={styles.connectionError}>Não foi possível conectar ao Supabase ({statusCanal}).</Text>
         ) : null}
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  screen: {
     flex: 1,
     backgroundColor: colors.background,
   },
@@ -438,107 +358,6 @@ const styles = StyleSheet.create({
   },
   databaseText: {
     color: colors.warning,
-  },
-  previewFrame: {
-    overflow: 'hidden',
-    borderRadius: 12,
-    backgroundColor: '#020617',
-  },
-  previewContent: {
-    height: 174,
-    flexDirection: 'row',
-    position: 'relative',
-    overflow: 'hidden',
-    backgroundColor: '#060b19',
-  },
-  previewSplit: {
-    alignItems: 'stretch',
-  },
-  previewMedia: {
-    flex: 1,
-    minWidth: 0,
-    backgroundColor: '#020617',
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  previewImage: {
-    width: '100%',
-    height: '100%',
-  },
-  previewOverlay: {
-    position: 'absolute',
-    left: 9,
-    right: 9,
-    bottom: 9,
-    padding: 9,
-    borderRadius: 9,
-    backgroundColor: 'rgba(6,11,25,0.87)',
-  },
-  previewText: {
-    flex: 1,
-    minWidth: 0,
-    paddingHorizontal: 8,
-    paddingVertical: 9,
-    justifyContent: 'center',
-    backgroundColor: '#0b1222',
-  },
-  previewTextOnly: {
-    paddingHorizontal: 20,
-  },
-  previewTitle: {
-    color: colors.text,
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '900',
-  },
-  previewDescription: {
-    color: '#d2dbea',
-    fontSize: 9,
-    lineHeight: 13,
-    marginTop: 5,
-  },
-  previewSchedule: {
-    color: colors.primary,
-    fontSize: 8,
-    fontWeight: '800',
-    marginTop: 5,
-  },
-  noMedia: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  noMediaText: {
-    color: colors.textMuted,
-    fontSize: 8,
-    fontWeight: '800',
-    letterSpacing: 1,
-  },
-  previewTicker: {
-    height: 22,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#111a36',
-    overflow: 'hidden',
-  },
-  tickerLabel: {
-    height: '100%',
-    paddingHorizontal: 9,
-    textAlignVertical: 'center',
-    color: '#060b19',
-    backgroundColor: colors.primary,
-    fontSize: 8,
-    fontWeight: '900',
-    letterSpacing: 0.5,
-  },
-  tickerText: {
-    flex: 1,
-    color: colors.text,
-    paddingHorizontal: 8,
-    fontSize: 8,
-    fontWeight: '700',
   },
   previewOffline: {
     height: 174,

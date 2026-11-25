@@ -1,7 +1,10 @@
+import { AppState } from 'react-native';
+import { lerLetreiroAtual } from './letreiroService';
 import { supabase } from './supabase';
 
 const CANAL_TV = 'canal-tv-barao';
 const INTERVALO_ATUALIZACAO_BANCO = 8000;
+const LIMITE_SEM_SINAL_DA_TV = 12000;
 let canalControleAtivo = null;
 
 function lerEstadoDaTV(canal) {
@@ -17,27 +20,19 @@ function lerEstadoDaTV(canal) {
 
 async function lerPreviaDoBanco() {
   const camposAviso = 'id,titulo,descricao,categoria,horario,duracao,link_fundo';
-  const [avisoResult, letreiroResult] = await Promise.all([
+  const [avisoResult, letreiro] = await Promise.all([
     supabase
       .from('avisos')
       .select(camposAviso)
-      .neq('categoria', 'Letreiro')
+      .not('categoria', 'ilike', 'Letreiro')
       .order('id', { ascending: false }),
-    supabase
-      .from('avisos')
-      .select('descricao')
-      .ilike('categoria', 'letreiro')
-      .order('id', { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+    lerLetreiroAtual(),
   ]);
 
   if (avisoResult.error) throw avisoResult.error;
-  if (letreiroResult.error) throw letreiroResult.error;
-
   return {
     avisos: avisoResult.data || [],
-    letreiro: letreiroResult.data?.descricao || 'Painel Informativo PEI Barão de Jundiaí',
+    letreiro,
   };
 }
 
@@ -53,6 +48,22 @@ export function conectarControleTV({
     },
   });
   canalControleAtivo = canal;
+
+  let ultimoSinal = 0;
+  let temporizadorDaTV;
+
+  function limparEstadoDaTV() {
+    clearTimeout(temporizadorDaTV);
+    ultimoSinal = 0;
+    aoMudarEstado(null);
+  }
+
+  function receberEstadoDaTV(estado) {
+    clearTimeout(temporizadorDaTV);
+    ultimoSinal = Date.now();
+    aoMudarEstado(estado);
+    temporizadorDaTV = setTimeout(limparEstadoDaTV, LIMITE_SEM_SINAL_DA_TV);
+  }
 
   let leituraEmAndamento = false;
   const atualizarPreviaBanco = async () => {
@@ -79,22 +90,36 @@ export function conectarControleTV({
   }, atualizarPreviaBanco);
 
   canal.on('presence', { event: 'sync' }, () => {
-    if (canalControleAtivo === canal) aoMudarEstado(lerEstadoDaTV(canal));
+    if (canalControleAtivo !== canal || ultimoSinal) return;
+
+    const estado = lerEstadoDaTV(canal);
+    if (estado) receberEstadoDaTV(estado);
   });
   canal.on('broadcast', { event: 'estado-tv' }, ({ payload }) => {
-    if (canalControleAtivo === canal && payload?.papel === 'tv') aoMudarEstado(payload);
+    if (canalControleAtivo === canal && payload?.papel === 'tv') receberEstadoDaTV(payload);
   });
 
   canal.subscribe((status) => {
     if (canalControleAtivo !== canal) return;
     aoMudarConexao(status);
-    if (status === 'SUBSCRIBED') {
-      aoMudarEstado(lerEstadoDaTV(canal));
+    if (status !== 'SUBSCRIBED') {
+      limparEstadoDaTV();
     }
+  });
+
+  const appStateSubscription = AppState.addEventListener('change', (estado) => {
+    if (estado !== 'active') return;
+
+    if (ultimoSinal && Date.now() - ultimoSinal >= LIMITE_SEM_SINAL_DA_TV) {
+      limparEstadoDaTV();
+    }
+    void atualizarPreviaBanco();
   });
 
   return () => {
     clearInterval(intervaloBanco);
+    clearTimeout(temporizadorDaTV);
+    appStateSubscription.remove();
     if (canalControleAtivo === canal) canalControleAtivo = null;
     supabase.removeChannel(canal);
   };
